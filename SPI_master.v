@@ -33,18 +33,25 @@ module SPI_master
         input               reset,
         
         // TX
-        output reg          o_TX_READY,
         input[7:0]          i_TX_DATA,
         input               i_TX_START,
         
         // RX
         output reg[7:0]     o_RX_DATA,
-        output reg          o_RX_DONE,
+        
+        // Slave
+        input[1:0]          i_SS,
+        output reg          o_S0,
+        output reg          o_S1,
+        output reg          o_S2,
+        output reg          o_S3,
+        
         
         // SPI
         output reg          S_CLK,
         output reg          o_MOSI,
-        input               i_MISO
+        input               i_MISO,
+        output reg          o_SPIC 
     );
     
     // constants
@@ -57,60 +64,59 @@ module SPI_master
     reg                 leading_edge;
     reg                 trailing_edge;
     reg                 spi_clk;
-    reg                 r_tx_ready;
     reg[3:0]            rx_counter;
     reg[7:0]            r_rx_data;
     reg[2:0]            tx_counter;
     reg[7:0]            tx_data;        
     reg                 r_tx_start;
-    reg                 r_rx_done;
+    reg                 r_spic;
     
     // Serial Clock
     always@(posedge P_CLK, posedge reset) begin
         if(reset) begin
-            edge_counter <= 3'b000;
+            edge_counter <= 5'b00000;
             p_clk_counter <= {clock_div{1'b0}};
             leading_edge <= 1'b0;
             trailing_edge <= 1'b0;             
             spi_clk <= cpol;
+            r_spic <= 1'b0;
         end
         else begin
+            trailing_edge <= 1'b0;
+            leading_edge <= 1'b0;
             if(i_TX_START) begin
                 edge_counter <= 5'b10000;
                 p_clk_counter <= {clock_div{1'b0}};
+                r_spic <= 1'b0;
             end  
-            trailing_edge <= 1'b0;
-            leading_edge <= 1'b0;
-            if(edge_counter > 5'b00000) begin
+            else if(edge_counter > 5'b00000) begin
                 if(p_clk_counter == CLOCK_DIVIDER/2 - 1'b1) begin
                     leading_edge <= 1'b1;
                     edge_counter <= edge_counter - 1'b1;
                     spi_clk <= ~spi_clk; 
-                    p_clk_counter <= p_clk_counter + 1'b1;
                 end
                 else if(p_clk_counter == CLOCK_DIVIDER - 1'b1) begin
                     trailing_edge <= 1'b1;
                     edge_counter <= edge_counter - 1'b1;
                     spi_clk <= ~spi_clk;
-                    p_clk_counter <= 4'b0000;
                 end
-                else p_clk_counter <= p_clk_counter + 1'b1;
+                p_clk_counter <= p_clk_counter + 1'b1;
             end
+            else r_spic <= 1'b1;
         end
     end
     
     // MOSI    
     always@(posedge P_CLK, posedge reset) begin
         if(reset) begin
-            o_MOSI <= 1'b0;
+            o_MOSI <= 1'bZ;
             tx_counter <= 3'b000;
-            o_TX_READY <= 1'b0;
         end    
         else begin
-            if(i_TX_START) begin
+            if(i_TX_START) begin 
                 tx_counter <= 3'b000;
-                o_TX_READY <= 1'b0;
             end
+            else if(r_spic) o_MOSI <= 1'bZ;
             else begin
             
                 // when the data is being sampled at the first leading edge
@@ -125,7 +131,6 @@ module SPI_master
                     tx_counter <= tx_counter + 1'b1;
                 end
                 
-                if(tx_counter == 3'b111) o_TX_READY <= 1'b1;
             end
         end
     end
@@ -135,33 +140,47 @@ module SPI_master
         if(reset) begin
             rx_counter <= 3'b111;
             r_rx_data <= {8{1'b0}};
-            o_RX_DONE <= 1'b0;
             o_RX_DATA <= {8{1'b0}};
         end    
         else begin
-            if(i_TX_START) begin
-                rx_counter <= 3'b111;
-                o_RX_DONE <= 1'b0;
-            end
+            if(i_TX_START) rx_counter <= 3'b111;
             else begin   
                 if((cpha & trailing_edge) | (~cpha & leading_edge)) begin
                     o_RX_DATA[rx_counter] <= i_MISO;
                     rx_counter <= rx_counter - 1'b1;
                 end
-                if(rx_counter == 3'b000) o_RX_DONE <= 1'b1;
             end
         end
     end
     
+    // Slave select
+    always@(posedge P_CLK, posedge reset) begin
+        if(reset) {o_S0, o_S1, o_S2, o_S3} <= 4'hF;
+        else if(i_TX_START) begin
+            case(i_SS) 
+                2'b00: o_S0 <= 1'b0;
+                2'b01: o_S1 <= 1'b0;
+                2'b10: o_S2 <= 1'b0;
+                2'b11: o_S3 <= 1'b0;
+                default: {o_S0, o_S1, o_S2, o_S3} <= 4'hF;
+            endcase
+        end
+        else {o_S0, o_S1, o_S2, o_S3} <= r_spic? 4'hF: {o_S0, o_S1, o_S2, o_S3};
+    end
+    
+    // SPI I/O
     always@(posedge P_CLK, posedge reset) begin
         if(reset) begin
             r_tx_start <= 1'b0;
             S_CLK <= cpol;
+            o_SPIC <= 1'b0;
+            tx_data <= {8{1'b0}};
         end
         else begin
             S_CLK <= spi_clk;
             r_tx_start <= i_TX_START;
-            if(i_TX_START) tx_data <= i_TX_DATA;
+            o_SPIC <= r_spic;          
+            if(i_TX_START) tx_data <= i_TX_DATA; 
         end
     end
     
