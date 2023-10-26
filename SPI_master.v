@@ -21,8 +21,8 @@
                                                                      
 module SPI_master 
       #(                                             
-        parameter     CLOCK_DIVIDER = 8,
-        parameter     SPI_MODE = 0
+        parameter     CLOCK_DIVIDER = 8
+        //parameter     SPI_MODE = 0
         // SPI MODE = 0, CPOL = 0, CPHA = 0
         // SPI MODE = 1, CPOL = 0, CPHA = 1
         // SPI MODE = 2, CPOL = 1, CPHA = 0
@@ -51,13 +51,15 @@ module SPI_master
         output reg          S_CLK,
         output reg          o_MOSI,
         input               i_MISO,
+        input               i_MODE_SET,
+        input[1:0]          SPI_MODE,
         output reg          o_SPIC 
     );
     
     // constants
     localparam          clock_div = $clog2(CLOCK_DIVIDER);
-    localparam          cpol = (SPI_MODE == 2 | SPI_MODE == 3);
-    localparam          cpha = (SPI_MODE == 1 | SPI_MODE == 3);
+    //localparam          cpol = (SPI_MODE == 2 | SPI_MODE == 3);
+    //localparam          cpha = (SPI_MODE == 1 | SPI_MODE == 3);
 
     reg[4:0]            edge_counter;
     reg[clock_div-1:0]  p_clk_counter;
@@ -71,6 +73,9 @@ module SPI_master
     reg                 r_tx_start;
     reg                 r_spic;
     
+    wire cpol, cpha;
+    assign {cpol, cpha} = SPI_MODE;
+    
     // Serial Clock
     always@(posedge P_CLK, posedge reset) begin
         if(reset) begin
@@ -82,6 +87,7 @@ module SPI_master
             r_spic <= 1'b0;
         end
         else begin
+            if(i_MODE_SET) spi_clk <= cpol;
             trailing_edge <= 1'b0;
             leading_edge <= 1'b0;
             if(i_TX_START) begin
@@ -138,16 +144,16 @@ module SPI_master
     // MISO    
      always@(posedge P_CLK, posedge reset) begin
         if(reset) begin
-            rx_counter <= 3'b111;
+            rx_counter <= 3'b000;
             r_rx_data <= {8{1'b0}};
             o_RX_DATA <= {8{1'b0}};
         end    
         else begin
-            if(i_TX_START) rx_counter <= 3'b111;
+            if(i_TX_START) rx_counter <= 3'b000;
             else begin   
                 if((cpha & trailing_edge) | (~cpha & leading_edge)) begin
                     o_RX_DATA[rx_counter] <= i_MISO;
-                    rx_counter <= rx_counter - 1'b1;
+                    rx_counter <= rx_counter + 1'b1;
                 end
             end
         end
@@ -177,6 +183,7 @@ module SPI_master
             tx_data <= {8{1'b0}};
         end
         else begin
+            if(i_MODE_SET) S_CLK <= cpol;
             S_CLK <= spi_clk;
             r_tx_start <= i_TX_START;
             o_SPIC <= r_spic;          
